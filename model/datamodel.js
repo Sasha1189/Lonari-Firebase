@@ -1,28 +1,11 @@
 // users/ (main minimal collection)
-//     {uid}
 //         - uid
 //         - phoneNumber
 //         - gender
 //         - subscriptionStatus (Free/Premium)
 
-// maleProfiles/ (separate detailed profile collection)
-//     {uid}
-//         - name
-//         - age
-//         - city
-//         - education
-//         - work
-//         - likesCount
-//         - imageUrls: [img1, img2, img3, img4]
-//         - aboutMe
-//         - hobbies
-//         - income
-//         - hometown
-//         - familyDetails
-//         - partnerExpectations
-
-// femaleProfiles/ (separate detailed profile collection)
-//     {uid}
+// Profiles/ (separate detailed profile collection)
+//         - {uid}
 //         - name
 //         - age
 //         - city

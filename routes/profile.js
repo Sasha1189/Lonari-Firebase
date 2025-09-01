@@ -3,12 +3,17 @@ const router = express.Router();
 authToken = require("../middlewares/authMiddleware");
 const {
   updateOrCreateProfile,
-  updateProfileImages,
   getProfile,
+  queryProfiles,
+  searchProfiles,
 } = require("../controllers/profileController");
 
 router.post("/update-profile", authToken, updateOrCreateProfile);
-router.post("/update-profile-images", authToken, updateProfileImages);
-router.post("/get-profile", authToken, getProfile);
+
+router.get("/get-profile", authToken, getProfile);
+
+router.get("/queryProfiles", queryProfiles);
+
+router.get("/searchProfiles", authToken, searchProfiles);
 
 module.exports = router;

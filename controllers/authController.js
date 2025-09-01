@@ -1,4 +1,4 @@
-const { db } = require("../firebase"); // import db and admin SDK
+const { db } = require("../firebaseAdmin"); // import db and admin SDK
 
 // Update Mobile Number Controller
 const updateMobileNumber = async (req, res) => {

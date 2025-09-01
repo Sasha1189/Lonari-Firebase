@@ -1,67 +1,69 @@
-const { admin } = require("../firebase");
-const { db } = require("../firebase");
+const { admin } = require("../firebaseAdmin");
+const { db } = require("../firebaseAdmin");
+const { Timestamp } = require("firebase-admin/firestore");
 
-const verifyToken = async (token) => {
-  try {
-    await admin.auth().verifyIdToken(token);
-  } catch (err) {
-    console.error("Token verification failed:", err);
-    return res.status(401).json({ error: "Invalid or expired token" });
-  }
-};
 // Create User Doc
 const createUserDoc = async (req, res) => {
-  console.log("req received create user doc");
   try {
-    const { uid, phoneNumber, newGender } = req.body;
-    // Verify the token
-    // await verifyToken(token);
-     console.log("m", newGender);
+    const { uid, phoneNumber, displayName } = req.body;
 
-    if (!uid || !phoneNumber || !newGender) {
-      return res
-        .status(400)
-        .json({ message: "User credentials are required." });
+    if (!uid || !phoneNumber || !displayName) {
+      return res.status(400).json({ message: "User credentials are required" });
     }
-    console.log("m2", newGender);
-    
 
-    try {
-      const userRef = db.collection("users").doc(uid);
-      const userDoc = await userRef.get();
+    const userRef = db.collection("users").doc(uid);
+    const userDoc = await userRef.get();
+    // console.log("userDoc", userDoc);
 
-      if (userDoc.exists) {
-        await userRef.update({
-      gender: newGender
-    })
-        return res.status(200).json({
-          message:"Gender updated successfully"
-        });
-      }
-
+    if (userDoc.exists) {
+      await userRef.update({
+        gender: displayName,
+      });
+      console.log("User document already exists");
+      return res.status(200).json({
+        message: "Gender updated successfully",
+      });
+    } else {
       // User does not exist – create
       await userRef.set({
         uid: uid,
         phoneNumber: phoneNumber,
-        gender: newGender || null,
+        displayName: null,
+        gender: displayName,
         isSubscribed: false,
         subscriptionType: "Free",
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+      //create userProgresscollection
+      await db
+        .collection("userProgress")
+        .doc(uid)
+        .set({
+          browseAll: { lastCreatedAt: null, lastId: null },
+          recommended: { lastScore: null, lastId: null },
+          latestUpdated: { lastUpdatedAt: null, lastId: null },
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
 
-      const userData = await userRef.get();
-     
-
-      return res.status(201).json({
-        message: "User document created successfully",
-        userData,
+      //create maleProfile/femaleProfile collection
+      const normalizedGender = displayName.toLowerCase();
+      const collectionName =
+        normalizedGender === "male" ? "maleProfiles" : "femaleProfiles";
+      await db.collection(collectionName).doc(uid).set({
+        uid,
+        gender: normalizedGender,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
       });
-    } catch (error) {
-      console.error("Error creating user:", error);
-      return res
-        .status(500)
-        .json({ message: "Failed to create or fetch user." });
     }
+
+    const userData = await userRef.get();
+    const userDocData = userData.data();
+
+    return res.status(201).json({
+      message: "User document created successfully",
+      user: userDocData,
+    });
   } catch (error) {
     console.error("Create User Error:", error);
     return res
@@ -73,7 +75,7 @@ const createUserDoc = async (req, res) => {
 const updateUserDoc = async (req, res) => {
   try {
     const { uid } = req.user; // from authToken middleware
-    const gender = req.body;
+    const { gender } = req.body;
 
     if (!uid) {
       return res.status(400).json({ message: "User credential not found" });
@@ -88,8 +90,7 @@ const updateUserDoc = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
     // Update user document
-    const userData = await db.collection("users").doc(uid).update({ gender });
-    console.log("UserData", userData);
+    await db.collection("users").doc(uid).update({ gender });
 
     return res
       .status(200)
@@ -105,7 +106,7 @@ const updateUserDoc = async (req, res) => {
 const getUserByUid = async (req, res) => {
   try {
     const { uid } = req.params;
-    
+
     if (!uid) {
       return res.status(400).json({ message: "UID is required." });
     }
@@ -117,11 +118,13 @@ const getUserByUid = async (req, res) => {
     }
 
     const userData = userDoc.data(); // ✅ full user document
-    console.log("userData :", userData);
+
     return res.status(200).json(userData);
   } catch (error) {
     console.error("Get User Error:", error);
-    return res.status(500).json({ message: "Failed to fetch user", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Failed to fetch user", error: error.message });
   }
 };
 
@@ -192,3 +195,13 @@ module.exports = {
   updateOrCreateSettings,
   getSettings,
 };
+
+// userData : {
+//   uid: 'kaIBLncIbpZclN7oqD3rHBBFEjK2',
+//   phoneNumber: '+919766757697',
+//   displayName: null,
+//   gender: null,
+//   isSubscribed: false,
+//   subscriptionType: 'Free',
+//   createdAt: Timestamp { _seconds: 1746380431, _nanoseconds: 857000000 }
+// }
