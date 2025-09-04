@@ -2,6 +2,7 @@ const { db } = require("../firebaseAdmin");
 const { Timestamp } = require("firebase-admin/firestore");
 
 // 🔹 Common filter builder (reusable)
+
 const applyFilters = (
   query,
   { livesin, maritalStatus, income, minAge, maxAge }
@@ -15,17 +16,25 @@ const applyFilters = (
   const year = today.getFullYear();
 
   if (minAge) {
-    const maxDob = new Date(year - minAge, today.getMonth(), today.getDate());
-    query = query.where("dob", "<=", Timestamp.fromDate(maxDob));
+    const parsed = Number(minAge);
+    if (!isNaN(parsed)) {
+      const maxDob = new Date(year - parsed, today.getMonth(), today.getDate());
+      console.log("minAge filter: dob <=", maxDob);
+      query = query.where("dob", "<=", Timestamp.fromDate(maxDob));
+    }
   }
 
   if (maxAge) {
-    const minDob = new Date(
-      year - maxAge - 1,
-      today.getMonth(),
-      today.getDate() + 1
-    );
-    query = query.where("dob", ">=", Timestamp.fromDate(minDob));
+    const parsed = Number(maxAge);
+    if (!isNaN(parsed)) {
+      const minDob = new Date(
+        year - parsed - 1,
+        today.getMonth(),
+        today.getDate()
+      );
+      console.log("maxAge filter: dob >=", minDob);
+      query = query.where("dob", ">=", Timestamp.fromDate(minDob));
+    }
   }
 
   return query;
@@ -33,26 +42,35 @@ const applyFilters = (
 
 const queryBrowseAllProfiles = async (req, res) => {
   console.log("controller hit queryBrowseAllProfiles");
+  const queryParams = req.query.params
+    ? JSON.parse(req.query.params)
+    : req.query;
+  console.log(queryParams);
 
   const {
     gender,
+    uid,
     livesin,
     maritalStatus,
     minAge,
     maxAge,
     income,
-    limit = 10,
-  } = req.query;
+    limit,
+    reset,
+  } = queryParams;
 
-  const userId = req.user?.uid;
+  const userId = uid;
 
   try {
+    console.log("User ID:", userId, gender);
     if (!gender) return res.status(400).json({ message: "Gender is required" });
+    // console.log("gender provided:", gender);
 
     const oppositeGender = gender.toLowerCase() === "male" ? "female" : "male";
+    // console.log("Opposite gender:", oppositeGender);
     let query = db.collection(`${oppositeGender}Profiles`);
     // .where("visibility", "==", true);
-
+    // console.log("Initial query:", query);
     query = applyFilters(query, {
       livesin,
       maritalStatus,
@@ -66,35 +84,51 @@ const queryBrowseAllProfiles = async (req, res) => {
       .orderBy("__name__", "asc")
       .limit(Number(limit));
 
-    const progressRef = db.collection("userProgress").doc(userId);
-    const progressSnap = await progressRef.get();
-    if (progressSnap.exists && progressSnap.data()?.browseAll?.lastCreatedAt) {
-      const { lastCreatedAt, lastId } = progressSnap.data().browseAll;
-      query = query.startAfter(new Date(lastCreatedAt), lastId);
-    }
+    // const progressRef = db.collection("userProgress").doc(userId);
+
+    // // ✅ Reset progress when asked
+    // if (reset === "true") {
+    //   await progressRef.set(
+    //     { browseAll: null, updatedAt: Timestamp.now() },
+    //     { merge: true }
+    //   );
+    // }
+
+    // const progressSnap = await progressRef.get();
+    // console.log("Progress snap:", progressSnap.exists, progressSnap.data());
+    // if (progressSnap.exists && progressSnap.data()?.browseAll?.lastCreatedAt) {
+    //   const { lastCreatedAt, lastId } = progressSnap.data().browseAll;
+    //   query = query.startAfter(new Date(lastCreatedAt), lastId);
+    // }
 
     const snapshot = await query.get();
-    const profiles = [];
-    let lastCursor = null;
 
+    if (snapshot.empty) {
+      console.log("No more profiles for user:", userId);
+      return res.status(200).json({ profiles: [], done: true });
+    }
+
+    const profiles = [];
+    // let lastCursor = null;
     snapshot.forEach((doc) => {
       const data = doc.data();
       profiles.push({ id: doc.id, ...data });
-      lastCursor = {
-        lastCreatedAt: data.createdAt?.toDate?.() || null,
-        lastId: doc.id,
-      };
+      // lastCursor = {
+      //   lastCreatedAt: data.createdAt?.toDate?.() || null,
+      //   lastId: doc.id,
+      // };
     });
+    console.log("Profiles:", profiles);
 
-    if (lastCursor) {
-      await progressRef.set(
-        { browseAll: lastCursor, updatedAt: Timestamp.now() },
-        { merge: true }
-      );
-    }
+    // if (lastCursor) {
+    //   await progressRef.set(
+    //     { browseAll: lastCursor, updatedAt: Timestamp.now() },
+    //     { merge: true }
+    //   );
+    // }
 
     const done = profiles.length < Number(limit);
-    return res.status(200).json({ profiles, lastCursor, done });
+    return res.status(200).json({ profiles, done });
   } catch (e) {
     return res
       .status(500)
