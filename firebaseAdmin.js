@@ -8,4 +8,9 @@ admin.initializeApp({
 });
 
 const db = admin.firestore();
-module.exports = { admin, db };
+
+const Timestamp = admin.firestore.Timestamp;
+
+const FieldValue = admin.firestore.FieldValue;
+
+module.exports = { admin, db, Timestamp, FieldValue };

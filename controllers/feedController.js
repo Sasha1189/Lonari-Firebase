@@ -45,7 +45,6 @@ const queryBrowseAllProfiles = async (req, res) => {
   const queryParams = req.query.params
     ? JSON.parse(req.query.params)
     : req.query;
-  console.log(queryParams);
 
   const {
     gender,
@@ -62,12 +61,9 @@ const queryBrowseAllProfiles = async (req, res) => {
   const userId = uid;
 
   try {
-    console.log("User ID:", userId, gender);
     if (!gender) return res.status(400).json({ message: "Gender is required" });
-    // console.log("gender provided:", gender);
 
     const oppositeGender = gender.toLowerCase() === "male" ? "female" : "male";
-    // console.log("Opposite gender:", oppositeGender);
     let query = db.collection(`${oppositeGender}Profiles`);
     // .where("visibility", "==", true);
     // console.log("Initial query:", query);
@@ -118,7 +114,6 @@ const queryBrowseAllProfiles = async (req, res) => {
       //   lastId: doc.id,
       // };
     });
-    console.log("Profiles:", profiles);
 
     // if (lastCursor) {
     //   await progressRef.set(
