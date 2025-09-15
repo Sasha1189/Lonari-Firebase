@@ -9,8 +9,10 @@ const {
 } = require("../controllers/profileController");
 const {
   toggleLike,
-  likesSent,
-  likesReceived,
+  likesSentIds,
+  likesReceivedIds,
+  likesSentProfiles,
+  likesReceivedProfiles,
 } = require("../controllers/likeController");
 
 router.post("/update-profile", authToken, updateOrCreateProfile);
@@ -25,9 +27,9 @@ router.get("/searchProfiles", authToken, searchProfiles);
 
 router.post("/toggle-like", authToken, toggleLike);
 
-router.get("/likes-sentIds", authToken, likesSent);
+router.get("/likes-sentIds", authToken, likesSentIds);
 
-router.get("/likes-receivedIds", authToken, likesReceived);
+router.get("/likes-receivedIds", authToken, likesReceivedIds);
 
 //////
 router.get("/likes-sentProfiles", authToken, likesSentProfiles);

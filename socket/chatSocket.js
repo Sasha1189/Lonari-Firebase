@@ -2,7 +2,7 @@
 
 // module.exports = (io) => {
 //   io.on("connection", (socket) => {
-//     console.log("User connected:", socket.id);
+//     // console.log("User connected:", socket.id);
 
 //     const currentUserId = socket.handshake.auth?.userId;
 //     if (!currentUserId) {
@@ -10,8 +10,12 @@
 //       return socket.disconnect(true);
 //     }
 
-//     // Join room and send initial chat history
-//     socket.on("joinRoom", async (otherUserId) => {
+//     // Join room + initial history
+//     socket.on("joinRoom", async ({ otherUserId }) => {
+//       const currentUserId = socket.handshake.auth?.userId;
+//       if (!currentUserId || !otherUserId) return;
+
+//       // ✅ Generate consistent roomId
 //       const roomId = [currentUserId, otherUserId].sort().join("_");
 //       socket.join(roomId);
 
@@ -30,14 +34,80 @@
 
 //         socket.emit("chatHistory", messages.reverse());
 //       } catch (err) {
-//         console.error("Error fetching chatHistory:", err.message);
+//         socket.emit("error", { type: "chatHistory", message: err.message });
 //       }
 //     });
 
-//     // New message
-//     socket.on("chatMessage", async ({ otherUserId, text }) => {
+//     // Recent partners list
+//     socket.on("fetchRecentChatPartners", async () => {
+//       try {
+//         // fetch current user profile
+//         const userDoc = await db.collection("users").doc(currentUserId).get();
+//         if (!userDoc.exists) throw new Error("User profile not found");
+
+//         const gender = userDoc.data().gender.toLowerCase();
+
+//         console.log("🔥 fetchRecentChatPartners for", currentUserId, gender);
+
+//         // decide target gender collection
+//         const targetCollection =
+//           gender === "male" ? "femaleProfiles" : "maleProfiles";
+
+//         const snapshot = await db
+//           .collection("rooms")
+//           .where("participants", "array-contains", currentUserId)
+//           .orderBy("lastMessageAt", "desc")
+//           .limit(20)
+//           .get();
+
+//         const partners = await Promise.all(
+//           snapshot.docs.map(async (doc) => {
+//             const room = doc.data();
+//             const roomId = doc.id;
+
+//             // find the other participant
+//             const otherUserId = room.participants.find(
+//               (id) => id !== currentUserId
+//             );
+
+//             // fetch only required profile fields
+//             const profileSnap = await db
+//               .collection(targetCollection)
+//               .doc(otherUserId)
+//               .get();
+
+//             let otherUser = null;
+//             if (profileSnap.exists) {
+//               const { name, photos, age } = profileSnap.data();
+//               otherUser = { id: otherUserId, name, photo: photos?.[0], age };
+//             }
+
+//             return {
+//               roomId,
+//               lastMessage: room.lastMessage,
+//               lastMessageAt: room.lastMessageAt,
+//               otherUser,
+//               unreadCount: room.unreadCounts?.[currentUserId] || 0,
+//             };
+//           })
+//         );
+
+//         socket.emit("recentChatPartners", partners);
+//       } catch (err) {
+//         console.error("❌ Error in fetchRecentChatPartners:", err.message);
+//         socket.emit("error", {
+//           type: "recentChatPartners",
+//           message: err.message,
+//         });
+//       }
+//     });
+
+//     // Send new message
+//     socket.on("sendMessage", async ({ otherUserId, text }) => {
+//       const currentUserId = socket.handshake.auth?.userId;
 //       if (!text?.trim() || !otherUserId) return;
 
+//       // Generate roomId consistently
 //       const roomId = [currentUserId, otherUserId].sort().join("_");
 
 //       const newMessage = {
@@ -45,41 +115,77 @@
 //         receiverId: otherUserId,
 //         text: text.trim(),
 //         roomId,
-//         createdAt: new Date(),
+//         createdAt: admin.firestore.Timestamp.now(),
+//         status: "sent",
 //       };
 
 //       try {
 //         const docRef = await db.collection("messages").add(newMessage);
 //         const savedMsg = { _id: docRef.id, ...newMessage };
+
+//         // update room metadata
+//         await db
+//           .collection("rooms")
+//           .doc(roomId)
+//           .set(
+//             {
+//               participants: [currentUserId, otherUserId],
+//               lastMessage: newMessage.text,
+//               lastMessageAt: newMessage.createdAt,
+//               unreadCount: {
+//                 [otherUserId]: admin.firestore.FieldValue.increment(1),
+//               },
+//             },
+//             { merge: true }
+//           );
+
 //         io.to(roomId).emit("chatMessage", savedMsg);
 //       } catch (err) {
-//         console.error("Error sending chatMessage:", err.message);
+//         socket.emit("error", { type: "sendMessage", message: err.message });
 //       }
 //     });
 
-//     // Load older messages
+//     // load older messages
 //     socket.on(
 //       "fetchOldMessages",
-//       async ({ otherUserId, skip = 0, limit = 20 }) => {
+//       async ({ otherUserId, cursor, limit = 20 }) => {
+//         const currentUserId = socket.handshake.auth?.userId;
+//         if (!currentUserId || !otherUserId) return;
+
+//         // ✅ Generate consistent roomId
 //         const roomId = [currentUserId, otherUserId].sort().join("_");
 
 //         try {
-//           const snapshot = await db
+//           let query = db
 //             .collection("messages")
 //             .where("roomId", "==", roomId)
 //             .orderBy("createdAt", "desc")
-//             .offset(skip)
-//             .limit(limit)
-//             .get();
+//             .limit(limit);
+
+//           if (cursor) {
+//             const cursorDoc = await db.collection("messages").doc(cursor).get();
+//             if (cursorDoc.exists) {
+//               query = query.startAfter(cursorDoc);
+//             }
+//           }
+
+//           const snapshot = await query.get();
 
 //           const olderMessages = snapshot.docs.map((doc) => ({
 //             _id: doc.id,
 //             ...doc.data(),
 //           }));
 
-//           socket.emit("oldMessages", olderMessages.reverse());
+//           socket.emit("oldMessages", {
+//             messages: olderMessages.reverse(),
+//             nextCursor:
+//               snapshot.docs.length > 0
+//                 ? snapshot.docs[snapshot.docs.length - 1].id
+//                 : null,
+//           });
 //         } catch (err) {
 //           console.error("Error fetching oldMessages:", err.message);
+//           socket.emit("error", { type: "oldMessages", message: err.message });
 //         }
 //       }
 //     );
@@ -90,20 +196,57 @@
 //   });
 // };
 
+// =============================
+// 🔹 Firestore Collections Schema
+// =============================
+//
+// users (collection)
+//   userId (doc)
+//     { name, gender, age, photos[] }
+//
+// maleProfiles / femaleProfiles (collection)
+//   userId (doc)
+//     { name, age, photos[] }
+//
+// rooms (collection)
+//   roomId (doc)
+//     {
+//       participants: [userId1, userId2],
+//       lastMessage: string,
+//       lastMessageAt: Timestamp,
+//       unreadCounts: { [userId]: number }
+//     }
+//
+// messages (collection)
+//   messageId (doc)
+//     {
+//       roomId: string,
+//       senderId: string,
+//       receiverId: string,
+//       text: string,
+//       createdAt: Timestamp,
+//       status: "sent" | "delivered" | "read"
+//     }
+// =============================
+
 const { admin, db } = require("../firebaseAdmin");
 
 module.exports = (io) => {
   io.on("connection", (socket) => {
-    console.log("User connected:", socket.id);
-
     const currentUserId = socket.handshake.auth?.userId;
     if (!currentUserId) {
-      console.warn("Missing userId in auth handshake");
+      console.warn("❌ Missing userId in auth handshake");
       return socket.disconnect(true);
     }
 
-    // Join room + initial history
-    socket.on("joinRoom", async (otherUserId) => {
+    // ////////////////////////////////////////////////////
+    // 🔹 ChatRoomScreen (one-to-one conversation view)
+    // ////////////////////////////////////////////////////
+
+    // 1. Join room and load latest messages
+    socket.on("joinRoom", async ({ otherUserId }) => {
+      if (!otherUserId) return;
+
       const roomId = [currentUserId, otherUserId].sort().join("_");
       socket.join(roomId);
 
@@ -126,8 +269,8 @@ module.exports = (io) => {
       }
     });
 
-    // Send new message
-    socket.on("chatMessage", async ({ otherUserId, text }) => {
+    // 2. Send a new message
+    socket.on("sendMessage", async ({ otherUserId, text }) => {
       if (!text?.trim() || !otherUserId) return;
 
       const roomId = [currentUserId, otherUserId].sort().join("_");
@@ -145,9 +288,9 @@ module.exports = (io) => {
         const docRef = await db.collection("messages").add(newMessage);
         const savedMsg = { _id: docRef.id, ...newMessage };
 
-        // Update chat metadata
+        // update room metadata
         await db
-          .collection("chats")
+          .collection("rooms")
           .doc(roomId)
           .set(
             {
@@ -163,14 +306,16 @@ module.exports = (io) => {
 
         io.to(roomId).emit("chatMessage", savedMsg);
       } catch (err) {
-        socket.emit("error", { type: "chatMessage", message: err.message });
+        socket.emit("error", { type: "sendMessage", message: err.message });
       }
     });
 
-    // load older messages
+    // 3. Load older messages (pagination)
     socket.on(
       "fetchOldMessages",
       async ({ otherUserId, cursor, limit = 20 }) => {
+        if (!otherUserId) return;
+
         const roomId = [currentUserId, otherUserId].sort().join("_");
 
         try {
@@ -181,7 +326,6 @@ module.exports = (io) => {
             .limit(limit);
 
           if (cursor) {
-            // 👇 Use the timestamp + id of the last loaded doc
             const cursorDoc = await db.collection("messages").doc(cursor).get();
             if (cursorDoc.exists) {
               query = query.startAfter(cursorDoc);
@@ -203,11 +347,76 @@ module.exports = (io) => {
                 : null,
           });
         } catch (err) {
-          console.error("Error fetching oldMessages:", err.message);
+          console.error("❌ Error fetching oldMessages:", err.message);
+          socket.emit("error", { type: "oldMessages", message: err.message });
         }
       }
     );
 
+    // ////////////////////////////////////////////////////
+    // 🔹 RecentPartnerMessagesScreen (list of chatrooms)
+    // ////////////////////////////////////////////////////
+
+    socket.on("fetchRecentChatPartners", async () => {
+      try {
+        // fetch current user profile
+        const userDoc = await db.collection("users").doc(currentUserId).get();
+        if (!userDoc.exists) throw new Error("User profile not found");
+
+        const gender = userDoc.data().gender.toLowerCase();
+        const targetCollection =
+          gender === "male" ? "femaleProfiles" : "maleProfiles";
+
+        const snapshot = await db
+          .collection("rooms")
+          .where("participants", "array-contains", currentUserId)
+          .orderBy("lastMessageAt", "desc")
+          .limit(20)
+          .get();
+
+        const partners = await Promise.all(
+          snapshot.docs.map(async (doc) => {
+            const room = doc.data();
+            const roomId = doc.id;
+
+            const otherUserId = room.participants.find(
+              (id) => id !== currentUserId
+            );
+
+            const profileSnap = await db
+              .collection(targetCollection)
+              .doc(otherUserId)
+              .get();
+
+            let otherUser = null;
+            if (profileSnap.exists) {
+              const { name, photos, age } = profileSnap.data();
+              otherUser = { id: otherUserId, name, photo: photos?.[0], age };
+            }
+
+            return {
+              roomId,
+              lastMessage: room.lastMessage,
+              lastMessageAt: room.lastMessageAt,
+              otherUser,
+              unreadCount: room.unreadCounts?.[currentUserId] || 0,
+            };
+          })
+        );
+
+        socket.emit("recentChatPartners", partners);
+      } catch (err) {
+        console.error("❌ Error in fetchRecentChatPartners:", err.message);
+        socket.emit("error", {
+          type: "recentChatPartners",
+          message: err.message,
+        });
+      }
+    });
+
+    // ////////////////////////////////////////////////////
+    // Disconnect cleanup
+    // ////////////////////////////////////////////////////
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);
     });

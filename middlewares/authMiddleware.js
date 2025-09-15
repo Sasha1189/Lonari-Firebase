@@ -8,6 +8,12 @@ const authToken = async (req, res, next) => {
   try {
     const decoded = await admin.auth().verifyIdToken(token);
     req.user = decoded;
+    ////////////////////////////
+    // const user = await admin.auth().getUser(decoded.uid);
+    // req.user = {
+    //   uid: decoded.uid,
+    //   gender: user.displayName?.toLowerCase(), // "male" or "female"
+    // };
     next();
   } catch (err) {
     console.error("Token verification failed:", err);
