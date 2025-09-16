@@ -390,8 +390,19 @@ module.exports = (io) => {
 
             let otherUser = null;
             if (profileSnap.exists) {
-              const { name, photos, age } = profileSnap.data();
-              otherUser = { id: otherUserId, name, photo: photos?.[0], age };
+              const { fullName, photos, dateOfBirth, uid } = profileSnap.data();
+
+              const photo =
+                Array.isArray(photos) && photos.length > 0
+                  ? photos[0].downloadURL || null
+                  : null;
+
+              otherUser = {
+                id: uid || otherUserId,
+                name: fullName,
+                photo, // ✅ single string
+                dateOfBirth, // ✅ pass through, frontend calculates age
+              };
             }
 
             return {
