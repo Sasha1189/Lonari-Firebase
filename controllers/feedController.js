@@ -5,7 +5,7 @@ const { Timestamp } = require("firebase-admin/firestore");
 
 const applyFilters = (
   query,
-  { livesin, maritalStatus, income, minAge, maxAge }
+  { livesin, maritalStatus, income, minAge, maxAge },
 ) => {
   if (livesin) query = query.where("livesin", "==", livesin);
   if (maritalStatus) query = query.where("maritalStatus", "==", maritalStatus);
@@ -30,7 +30,7 @@ const applyFilters = (
       const minDob = new Date(
         year - parsed - 1,
         today.getMonth(),
-        today.getDate()
+        today.getDate(),
       );
       console.log("maxAge filter: dob >=", minDob);
       query = query.where("dob", ">=", Timestamp.fromDate(minDob));
@@ -40,91 +40,132 @@ const applyFilters = (
   return query;
 };
 
-const queryBrowseAllProfiles = async (req, res) => {
-  console.log("controller hit queryBrowseAllProfiles");
-  const queryParams = req.query.params
-    ? JSON.parse(req.query.params)
-    : req.query;
+// const queryBrowseAllProfilesold = async (req, res) => {
+//   console.log("controller hit queryBrowseAllProfiles");
+//   const queryParams = req.query.params
+//     ? JSON.parse(req.query.params)
+//     : req.query;
 
+//   const {
+//     gender,
+//     uid,
+//     livesin,
+//     maritalStatus,
+//     minAge,
+//     maxAge,
+//     income,
+//     limit,
+//     reset,
+//   } = queryParams;
+
+//   const userId = uid;
+
+//   try {
+//     if (!gender) return res.status(400).json({ message: "Gender is required" });
+
+//     const oppositeGender = gender.toLowerCase() === "male" ? "female" : "male";
+//     let query = db.collection(`${oppositeGender}Profiles`);
+//     // .where("visibility", "==", true);
+//     // console.log("Initial query:", query);
+//     query = applyFilters(query, {
+//       livesin,
+//       maritalStatus,
+//       income,
+//       minAge,
+//       maxAge,
+//     });
+
+//     query = query
+//       .orderBy("createdAt", "asc")
+//       .orderBy("__name__", "asc")
+//       .limit(Number(limit));
+
+//     const snapshot = await query.get();
+
+//     if (snapshot.empty) {
+//       console.log("No more profiles for user:", userId);
+//       return res.status(200).json({ profiles: [], done: true });
+//     }
+
+//     const profiles = [];
+//     // let lastCursor = null;
+//     snapshot.forEach((doc) => {
+//       const data = doc.data();
+//       profiles.push({ id: doc.id, ...data });
+//       // lastCursor = {
+//       //   lastCreatedAt: data.createdAt?.toDate?.() || null,
+//       //   lastId: doc.id,
+//       // };
+//     });
+
+//     // if (lastCursor) {
+//     //   await progressRef.set(
+//     //     { browseAll: lastCursor, updatedAt: Timestamp.now() },
+//     //     { merge: true }
+//     //   );
+//     // }
+
+//     const done = profiles.length < Number(limit);
+//     return res.status(200).json({ profiles, done });
+//   } catch (e) {
+//     return res
+//       .status(500)
+//       .json({ message: "Error fetching profiles", error: e.message });
+//   }
+// };
+
+const queryBrowseAllProfiles = async (req, res) => {
+  // 1. Unified param extraction
   const {
     gender,
     uid,
-    livesin,
-    maritalStatus,
-    minAge,
-    maxAge,
-    income,
-    limit,
-    reset,
-  } = queryParams;
-
-  const userId = uid;
+    limit = 10,
+    lastCreatedAt, // 🔹 The Cursor sent by TanStack Query
+  } = req.query.params ? JSON.parse(req.query.params) : req.query;
 
   try {
-    if (!gender) return res.status(400).json({ message: "Gender is required" });
+    if (!gender || !uid) {
+      return res.status(400).json({ message: "Gender and UID are required" });
+    }
 
-    const oppositeGender = gender.toLowerCase() === "male" ? "female" : "male";
-    let query = db.collection(`${oppositeGender}Profiles`);
-    // .where("visibility", "==", true);
-    // console.log("Initial query:", query);
-    query = applyFilters(query, {
-      livesin,
-      maritalStatus,
-      income,
-      minAge,
-      maxAge,
-    });
+    // 2. Identify the opposite shard
+    const targetGender = gender.toLowerCase() === "male" ? "female" : "male";
+    const collectionName = `${targetGender}Profiles`;
 
-    query = query
+    let query = db
+      .collection(collectionName)
       .orderBy("createdAt", "asc")
-      .orderBy("__name__", "asc")
-      .limit(Number(limit));
+      .orderBy("__name__", "asc"); // Tie-breaker for perfect pagination
 
-    // const progressRef = db.collection("userProgress").doc(userId);
+    // 3. 🔹 CURSOR PAGINATION
+    if (lastCreatedAt) {
+      query = query.startAfter(lastCreatedAt);
+    }
 
-    // // ✅ Reset progress when asked
-    // if (reset === "true") {
-    //   await progressRef.set(
-    //     { browseAll: null, updatedAt: Timestamp.now() },
-    //     { merge: true }
-    //   );
-    // }
-
-    // const progressSnap = await progressRef.get();
-    // console.log("Progress snap:", progressSnap.exists, progressSnap.data());
-    // if (progressSnap.exists && progressSnap.data()?.browseAll?.lastCreatedAt) {
-    //   const { lastCreatedAt, lastId } = progressSnap.data().browseAll;
-    //   query = query.startAfter(new Date(lastCreatedAt), lastId);
-    // }
-
-    const snapshot = await query.get();
+    // 4. Fetch exactly 'limit' number of docs
+    const snapshot = await query.limit(Number(limit)).get();
 
     if (snapshot.empty) {
-      console.log("No more profiles for user:", userId);
       return res.status(200).json({ profiles: [], done: true });
     }
 
-    const profiles = [];
-    // let lastCursor = null;
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      profiles.push({ id: doc.id, ...data });
-      // lastCursor = {
-      //   lastCreatedAt: data.createdAt?.toDate?.() || null,
-      //   lastId: doc.id,
-      // };
+    // 5. Map data simply (No self-exclusion filter needed here)
+    const profiles = snapshot.docs.map((doc) => ({
+      uid: doc.id,
+      ...doc.data(),
+    }));
+
+    // 6. Check if we reached the end of the collection
+    const done = snapshot.docs.length < Number(limit);
+
+    return res.status(200).json({
+      profiles,
+      lastCreatedAt:
+        profiles.length > 0 ? profiles[profiles.length - 1].createdAt : null,
+      done,
     });
-
-    // if (lastCursor) {
-    //   await progressRef.set(
-    //     { browseAll: lastCursor, updatedAt: Timestamp.now() },
-    //     { merge: true }
-    //   );
-    // }
-
-    const done = profiles.length < Number(limit);
-    return res.status(200).json({ profiles, done });
   } catch (e) {
+    console.error("❌ Firestore Error:", e.message);
     return res
       .status(500)
       .json({ message: "Error fetching profiles", error: e.message });
@@ -182,7 +223,7 @@ const queryRecommendedProfiles = async (req, res) => {
     if (lastCursor) {
       await progressRef.set(
         { recommended: lastCursor, updatedAt: Timestamp.now() },
-        { merge: true }
+        { merge: true },
       );
     }
 
@@ -253,7 +294,7 @@ const queryLatestUpdatedProfiles = async (req, res) => {
     if (lastCursor) {
       await progressRef.set(
         { latestUpdated: lastCursor, updatedAt: Timestamp.now() },
-        { merge: true }
+        { merge: true },
       );
     }
 
